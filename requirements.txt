@@ -1,0 +1,26 @@
+# requirements.txt
+
+# Core ML/DL framework
+# For CUDA 12.4, PyTorch typically uses the cu121 wheels,
+# as they are generally compiled to be forward-compatible with minor CUDA toolkit updates.
+# Always double-check the official PyTorch website for the latest recommended command for your specific setup.
+torch --index-url https://download.pytorch.org/whl/cu121
+torchvision --index-url https://download.pytorch.org/whl/cu121
+torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Hugging Face ecosystem
+transformers
+datasets
+trl
+accelerate
+peft
+evaluate
+
+# Utilities
+tqdm
+
+# Optional for experiment tracking (highly recommended)
+wandb
+
+# Optional for 8-bit quantization on Linux (if needed for memory saving)
+# bitsandbytes
