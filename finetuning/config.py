@@ -28,12 +28,14 @@ class ModelConfig:
 
 @dataclass
 class DataConfig:
-    """Data configuration for MBPP dataset."""
-    dataset_name: str = "mbpp"
+    """Data configuration for training datasets."""
+    dataset_name: str = "mbpp"  # "mbpp" or "humaneval" 
+    split: str = "train"  # For MBPP: "train", "test", "validation"; For HumanEval: "test"
     max_prompt_length: int = 512
     max_completion_length: int = 512
     train_test_split: float = 0.9
     num_proc: int = 4
+    max_samples: Optional[int] = None  # Limit number of samples for testing
     
 
 @dataclass 
@@ -61,27 +63,35 @@ class TrainingConfig:
     greater_is_better: bool = True
     
     # RL specific settings
-    ppo_epochs: int = 2
+    ppo_epochs: int = 4
     mini_batch_size: int = 1
-    vf_coef: float = 0.3
-    cliprange: float = 0.15
+    vf_coef: float = 0.1
+    cliprange: float = 0.2
     cliprange_value: float = 0.15
     gamma: float = 1.0
     lam: float = 0.95
     target_kl: float = 0.5
     
     # GRPO specific settings
-    grpo_alpha: float = 10.0
+    num_samples: int = 8  # Number of samples generated per prompt
+    kl_coeff: float = 0.02  # KL divergence coefficient
+    clip_range: float = 0.2  # PPO clipping range
+    entropy_coeff: float = 0.01  # Entropy regularization coefficient
+    use_advantage_whitening: bool = True  # Whether to use advantage whitening
+    advantage_norm_eps: float = 1e-8  # Epsilon for whitening
+    temperature_schedule: bool = True  # Whether to use temperature scheduling
+    initial_temperature: float = 1.0  # Initial temperature
+    min_temperature: float = 0.7  # Minimum temperature
     
     # Generation settings
-    max_new_tokens: int = 256
+    max_new_tokens: int = 2048
     do_sample: bool = True
-    temperature: float = 0.7
+    temperature: float = 0.2
     top_p: float = 0.9
     
     # Reward settings
     reward_model_path: Optional[str] = None
-    code_execution_timeout: float = 10.0
+    code_execution_timeout: float = 3.0
     
 
 @dataclass
@@ -110,15 +120,22 @@ class ExperimentConfig:
     wandb_run_name: Optional[str] = None
     
     def __post_init__(self):
-        # Set wandb run name if not provided
-        if self.wandb_run_name is None:
-            self.wandb_run_name = f"codellama-7b-{self.method}-qlora"
+        # Import here to avoid circular imports
+        try:
+            from train import extract_model_short_name
+            model_short_name = extract_model_short_name(self.model.model_name)
+        except ImportError:
+            # Fallback if train module is not available
+            model_short_name = "codellama-7b"
         
-        # Set output dir based on method
-        self.training.output_dir = f"./checkpoints/{self.method}-qlora"
+        # Set output dir based on new naming convention
+        self.training.output_dir = f"./checkpoints/{model_short_name}-{self.method}-qlora"
         
-        # Set hub model id based on method
-        self.hf.hub_model_id = f"codellama-7b-mbpp-{self.method}-qlora"
+        # Set hub model id based on new naming convention
+        self.hf.hub_model_id = f"{model_short_name}-{self.method}-qlora"
+        
+        # Always update wandb_run_name to new format (because model name might change after initialization)
+        self.wandb_run_name = f"{model_short_name}-{self.method}-qlora"
 
 
 # Load configuration from environment variables

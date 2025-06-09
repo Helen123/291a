@@ -9,10 +9,12 @@ from trl.core import LengthSampler
 from tqdm import tqdm
 import torch.nn.functional as F
 import torch.optim as optim
+from pathlib import Path
+import shutil
 
 from config import ExperimentConfig
 from model_utils import load_tokenizer, load_base_model, setup_lora_model, save_model_and_tokenizer, calculate_model_size
-from data_utils import create_mbpp_dataset_for_rl, RewardFunction, MBPPDataProcessor
+from data_utils import create_mbpp_dataset_for_rl, RewardFunction, MBPPDataProcessor, create_dataset_for_rl
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +37,36 @@ class CodePPOTrainer:
         self.dataset = None
         self.optimizer = None
         
-        # IMPROVED PPO hyperparameters (根据训练结果优化)
-        self.ppo_epochs = 2  # 减少PPO epochs，防止过拟合
-        self.clip_range = 0.15  # 稍微降低clip range，更保守的更新
-        self.value_loss_coef = 0.3  # 降低value loss权重
-        self.entropy_loss_coef = 0.02  # 增加熵损失，鼓励探索
-        self.kl_coef = 0.15  # 大幅增加KL惩罚，防止偏离太远
-        self.learning_rate = 3e-6  # 大幅降低学习率，更稳定
-        self.max_kl_threshold = 0.5  # 添加KL阈值，超过则跳过更新
+        # IMPROVED PPO hyperparameters (optimized based on training results)
+        self.ppo_epochs = getattr(config.training, 'ppo_epochs', 2)  # Get from config
+        self.clip_range = getattr(config.training, 'cliprange', 0.15)  # Get from config
+        self.value_loss_coef = 0.5  # Standard value loss weight
+        self.entropy_loss_coef = 0.01  # Moderate entropy loss, encourage exploration
+        self.kl_coef = 0.1  # Moderate KL penalty
+        self.learning_rate = config.training.learning_rate  # Get from config
+        self.max_kl_threshold = getattr(config.training, 'target_kl', 0.3)  # Get from config
         
-        # 早停和最佳模型跟踪
+        # HumanEval special optimization
+        if hasattr(config.data, 'dataset_name') and config.data.dataset_name == 'humaneval':
+            # Stable hyperparameters for HumanEval
+            self.entropy_loss_coef = 0.02  # Moderate entropy loss
+            self.value_loss_coef = 0.5  # Standard value loss weight
+            self.max_kl_threshold = getattr(config.training, 'target_kl', 0.3)  # Strict KL limit
+            self.generation_temperature = getattr(config.training, 'temperature', 0.7)  # Use moderate temperature
+            self.num_samples_per_prompt = 4  # Reduce samples per prompt to improve quality
+            logger.info(f"🔧 HumanEval stable optimization: learning rate={self.learning_rate}, KL threshold={self.max_kl_threshold}, temperature={self.generation_temperature}")
+        else:
+            self.generation_temperature = getattr(config.training, 'temperature', 0.7)
+            self.num_samples_per_prompt = 4
+        
+        # Early stopping and best model tracking
         self.best_test_pass_rate = 0.0
         self.best_reward = 0.0
-        self.patience = 2  # 连续2个epoch性能下降则停止
+        # Get patience from config, default to 2, support disabling early stopping by setting to 0
+        self.patience = getattr(config.training, 'early_stopping_patience', 2)
+        # If early stopping is explicitly disabled, set patience to 0
+        if getattr(config, 'no_early_stopping', False):
+            self.patience = 0
         self.patience_counter = 0
         self.early_stop = False
         
@@ -107,9 +126,9 @@ class CodePPOTrainer:
         self.optimizer = optim.AdamW(
             trainable_params, 
             lr=self.learning_rate,
-            betas=(0.9, 0.95),  # 更保守的momentum
+            betas=(0.9, 0.95),  # More conservative momentum
             eps=1e-8,
-            weight_decay=0.01  # 添加权重衰减
+            weight_decay=0.01  # Add weight decay
         )
         
         # Calculate and log model size
@@ -131,12 +150,14 @@ class CodePPOTrainer:
         
     def setup_data(self):
         """Setup training dataset."""
-        logger.info("Loading and preprocessing MBPP dataset...")
+        dataset_name = self.config.data.dataset_name.lower()
+        logger.info(f"Loading and preprocessing {dataset_name.upper()} dataset...")
         
-        # Load dataset
-        self.dataset = create_mbpp_dataset_for_rl(
-            split="train",
-            max_samples=None  # Use full dataset
+        # Load dataset based on configuration
+        self.dataset = create_dataset_for_rl(
+            dataset_name=dataset_name,
+            split=self.config.data.split,
+            max_samples=self.config.data.max_samples
         )
         
         # Filter out examples that are too long
@@ -146,28 +167,20 @@ class CodePPOTrainer:
         
         self.dataset = self.dataset.filter(filter_long_examples)
         
-        # Tokenize dataset
-        def tokenize_function(examples):
-            return {
-                "input_ids": [
-                    self.tokenizer.encode(prompt, truncation=True, max_length=self.config.data.max_prompt_length)
-                    for prompt in examples["prompt"]
-                ]
-            }
-        
-        self.dataset = self.dataset.map(tokenize_function, batched=True)
-        
-        logger.info(f"Dataset loaded with {len(self.dataset)} examples")
+        logger.info(f"{dataset_name.upper()} dataset loaded with {len(self.dataset)} examples")
         
     def setup_reward_function(self):
         """Setup reward function for code execution."""
-        logger.info("Setting up reward function...")
+        dataset_name = self.config.data.dataset_name.lower()
+        logger.info(f"Setting up reward function for {dataset_name.upper()} dataset...")
         
         self.reward_fn = RewardFunction(
             timeout=self.config.training.code_execution_timeout,
             max_reward=1.0,
             min_reward=0.0,
-            syntax_penalty=-0.1
+            syntax_penalty=-0.2,
+            quality_bonus=0.1,
+            dataset_type=dataset_name
         )
         
     def generate_response(self, query_tensor: torch.Tensor) -> torch.Tensor:
@@ -190,7 +203,7 @@ class CodePPOTrainer:
         generation_kwargs = {
             "max_new_tokens": self.config.training.max_new_tokens,
             "do_sample": self.config.training.do_sample,
-            "temperature": self.config.training.temperature,
+            "temperature": self.generation_temperature,
             "top_p": self.config.training.top_p,
             "pad_token_id": self.tokenizer.pad_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
@@ -288,7 +301,7 @@ class CodePPOTrainer:
             generated_codes=full_generations,
             prompts=queries,
             test_cases=test_cases,
-            max_workers=4
+            max_workers=8
         )
         
         # Compute KL divergences (only if we have tensor data)
@@ -320,7 +333,9 @@ class CodePPOTrainer:
         
         syntax_errors = sum(1 for d in details if d.get('has_syntax_error', False))
         
-        # Count problems with perfect solutions (pass_ratio = 1.0) for bigcode-style reporting
+        # Count problems with perfect solutions (test_ratio = 1.0) for accuracy reporting
+        # NOTE: This is "accuracy" not true "pass@1" since we only generate one solution per prompt
+        # True pass@k requires k solutions per problem and measures if any solution passes
         perfect_solutions = sum(1 for d in details if d.get('test_ratio', 0.0) == 1.0)
         
         metrics = {
@@ -331,7 +346,7 @@ class CodePPOTrainer:
             'syntax_errors': syntax_errors,
             'test_pass_rate': total_passed / total_tests if total_tests > 0 else 0.0,
             'perfect_solutions': perfect_solutions,
-            'perfect_solution_rate': perfect_solutions / len(details) if details else 0.0,
+            'accuracy': perfect_solutions / len(details) if details else 0.0,  # Rename to accuracy
             'avg_kl_divergence': sum(kl_divergences) / len(kl_divergences) if kl_divergences else 0.0,
             'avg_base_reward': sum(base_rewards) / len(base_rewards) if base_rewards else 0.0,
             'avg_final_reward': sum(final_rewards) / len(final_rewards) if final_rewards else 0.0,
@@ -453,6 +468,62 @@ class CodePPOTrainer:
         
         return advantages, returns
 
+    def _save_merged_epoch_model(self, epoch_num: int, test_pass_rate: float, reward: float):
+        """
+        Save merged model for specified epoch and clean up original adapter weights
+        
+        Args:
+            epoch_num: Epoch number
+            test_pass_rate: Test pass rate
+            reward: Average reward
+        """
+        # Import inside method to avoid circular imports
+        from train import merge_adapter_to_base, extract_model_short_name
+        from pathlib import Path
+        
+        logger.info(f"💾 Starting to save merged model for epoch {epoch_num}...")
+        
+        # First save current epoch's adapter
+        epoch_adapter_path = f"{self.config.training.output_dir}/epoch_{epoch_num}_adapter"
+        save_model_and_tokenizer(
+            self.model, 
+            self.tokenizer, 
+            epoch_adapter_path,
+            safe_serialization=True
+        )
+        
+        try:
+            # Generate merged model save path
+            base_model_name = self.config.model.model_name
+            dataset_name = self.config.data.dataset_name
+            method = self.config.method
+            model_short_name = extract_model_short_name(base_model_name)
+            
+            # Format: model-dataset-method-qlora-merged-epoch{N}-pass{pass_rate:.3f}
+            merged_model_dir = (f"./checkpoints/{model_short_name}-{dataset_name}-{method}-qlora-merged-"
+                              f"epoch{epoch_num}-pass{test_pass_rate:.3f}")
+            
+            # Execute merge
+            logger.info(f"🔗 Merging adapter to base model...")
+            merge_adapter_to_base(
+                adapter_path=epoch_adapter_path,
+                base_model_name=base_model_name,
+                output_dir=merged_model_dir
+            )
+            
+            # Delete adapter weights after successful merge
+            if Path(epoch_adapter_path).exists():
+                logger.info(f"🗑️  Deleting original adapter weights: {epoch_adapter_path}")
+                shutil.rmtree(epoch_adapter_path)
+                logger.info(f"✅ Epoch {epoch_num} merged model saved and adapter cleaned up")
+            
+            logger.info(f"💾 Epoch {epoch_num} merged model: {merged_model_dir}")
+            
+        except Exception as e:
+            logger.error(f"❌ Epoch {epoch_num} merge model save failed: {e}")
+            logger.error("Retaining original adapter weights for manual processing")
+            # Don't delete adapter weights when error occurs
+    
     def train_step_complete_ppo(self, batch_data):
         """Complete PPO training step with gradient updates and KL divergence check."""
         # Extract batch data
@@ -544,7 +615,7 @@ class CodePPOTrainer:
                 "test_pass_rate": metrics.get('test_pass_rate', 0.0),
                 "avg_test_ratio": metrics.get('avg_test_ratio', 0.0),
                 "avg_quality_score": metrics.get('avg_quality_score', 0.0),
-                "pass_at_1": metrics.get('perfect_solution_rate', 0.0),
+                "accuracy": metrics.get('accuracy', 0.0),
                 "syntax_errors": metrics.get('syntax_errors', 0),
                 "total_tests": metrics.get('total_tests', 0),
                 "passed_tests": metrics.get('total_passed_tests', 0),
@@ -654,7 +725,7 @@ class CodePPOTrainer:
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 
-                # Gradient clipping (更保守)
+                # Gradient clipping (more conservative)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
                 
                 self.optimizer.step()
@@ -687,10 +758,10 @@ class CodePPOTrainer:
             "rewards/max": max(rewards) if rewards else 0.0,
             "rewards/min": min(rewards) if rewards else 0.0,
             "success_rate": sum(1 for r in rewards if r > 0) / len(rewards) if rewards else 0.0,
-            "test_pass_rate": metrics.get('test_pass_rate', 0.0),
-            "avg_test_ratio": metrics.get('avg_test_ratio', 0.0),
+            "test_pass_rate": metrics.get('test_pass_rate', 0.0),  # Pass rate for all tests
+            "avg_test_ratio": metrics.get('avg_test_ratio', 0.0),  # Average test pass ratio
             "avg_quality_score": metrics.get('avg_quality_score', 0.0),
-            "pass_at_1": metrics.get('perfect_solution_rate', 0.0),
+            "accuracy": metrics.get('accuracy', 0.0),  # Proportion of completely correct solutions (single generation)
             "syntax_errors": metrics.get('syntax_errors', 0),
             "total_tests": metrics.get('total_tests', 0),
             "passed_tests": metrics.get('total_passed_tests', 0),
@@ -768,7 +839,7 @@ class CodePPOTrainer:
                     pbar.set_postfix({
                         'Reward': f"{step_stats.get('rewards/mean', 0.0):.3f}",
                         'Success': f"{step_stats.get('success_rate', 0.0):.2f}",
-                        'Pass@1': f"{step_stats.get('pass_at_1', 0.0):.2f}",
+                        'Pass@1': f"{step_stats.get('accuracy', 0.0):.2f}",
                         'TestPass': f"{step_stats.get('test_pass_rate', 0.0):.2f}",
                         'KL': f"{step_stats.get('avg_kl_divergence', 0.0):.3f}",
                         'PolicyLoss': f"{step_stats.get('policy_loss', 0.0):.3f}",
@@ -819,7 +890,7 @@ class CodePPOTrainer:
                 avg_reward = sum(s.get('rewards/mean', 0.0) for s in epoch_stats) / len(epoch_stats)
                 avg_success_rate = sum(s.get('success_rate', 0.0) for s in epoch_stats) / len(epoch_stats)
                 avg_test_pass_rate = sum(s.get('test_pass_rate', 0.0) for s in epoch_stats) / len(epoch_stats)
-                avg_pass_at_1 = sum(s.get('pass_at_1', 0.0) for s in epoch_stats) / len(epoch_stats)
+                avg_pass_at_1 = sum(s.get('accuracy', 0.0) for s in epoch_stats) / len(epoch_stats)
                 avg_kl = sum(s.get('avg_kl_divergence', 0.0) for s in epoch_stats) / len(epoch_stats)
                 avg_base_reward = sum(s.get('avg_base_reward', 0.0) for s in epoch_stats) / len(epoch_stats)
                 avg_policy_loss = sum(s.get('policy_loss', 0.0) for s in epoch_stats) / len(epoch_stats)
@@ -841,17 +912,17 @@ class CodePPOTrainer:
                 logger.info(f"  Total Syntax Errors: {total_syntax_errors}")
                 logger.info(f"  Skipped Updates: {skipped_updates}/{len(epoch_stats)}")
                 
-                # 🚨 EARLY STOPPING CHECK
-                # 使用测试通过率作为主要指标，奖励作为辅助指标
+                # 🚨 EARLY STOPPING CHECK (only enable early stopping when patience > 0)
+                # Use test pass rate as main metric, reward as auxiliary metric
                 current_metric = avg_test_pass_rate
                 
                 if current_metric > self.best_test_pass_rate:
-                    # 性能提升，重置patience计数器
+                    # Performance improved, reset patience counter
                     self.best_test_pass_rate = current_metric
                     self.best_reward = avg_reward
                     self.patience_counter = 0
                     
-                    # 保存最佳模型
+                    # Save best model
                     best_model_path = f"{self.config.training.output_dir}/best_epoch_model"
                     save_model_and_tokenizer(
                         self.model.pretrained_model if hasattr(self.model, 'pretrained_model') else self.model, 
@@ -862,8 +933,8 @@ class CodePPOTrainer:
                     logger.info(f"🎯 NEW BEST EPOCH! Test pass rate: {current_metric:.4f}, Reward: {avg_reward:.4f}")
                     logger.info(f"💾 Best model saved to: {best_model_path}")
                     
-                else:
-                    # 性能下降或持平，增加patience计数器
+                elif self.patience > 0:  # Only check performance degradation when early stopping is enabled
+                    # Performance degraded or unchanged, increase patience counter
                     self.patience_counter += 1
                     performance_drop = self.best_test_pass_rate - current_metric
                     logger.info(f"⚠️  Performance drop detected: {performance_drop:.4f} (patience: {self.patience_counter}/{self.patience})")
@@ -874,8 +945,13 @@ class CodePPOTrainer:
                         logger.info(f"📊 Current test pass rate: {current_metric:.4f}")
                         self.early_stop = True
                 
-                # 额外的KL散度安全检查
-                if avg_kl > 1.0:  # 如果KL散度过大，强制停止
+                # If early stopping is disabled, log but take no action
+                if self.patience == 0 and current_metric <= self.best_test_pass_rate:
+                    performance_drop = self.best_test_pass_rate - current_metric
+                    logger.info(f"ℹ️  Performance drop: {performance_drop:.4f} (early stopping disabled)")
+                
+                # Additional KL divergence safety check
+                if avg_kl > 1.0:  # Force stop if KL divergence is too large
                     logger.warning(f"🚨 EMERGENCY STOP: KL divergence {avg_kl:.4f} is too high!")
                     self.early_stop = True
                 
@@ -896,8 +972,12 @@ class CodePPOTrainer:
                         f"epoch_{epoch + 1}/patience_counter": self.patience_counter,
                         f"epoch_{epoch + 1}/best_test_pass_rate": self.best_test_pass_rate,
                     }, step=total_steps)
+                
+                # 💾 Save merged weights for each epoch (if enabled)
+                if getattr(self.config, 'save_merged_epochs', False):
+                    self._save_merged_epoch_model(epoch + 1, avg_test_pass_rate, avg_reward)
             
-            # 检查是否需要早停
+            # Check if early stopping is needed
             if self.early_stop:
                 logger.info(f"🏁 Training stopped early at epoch {epoch + 1}")
                 break

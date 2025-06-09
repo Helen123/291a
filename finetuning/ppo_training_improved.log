@@ -1,68 +1,0 @@
-INFO:__main__:Starting complete PPO training with gradient updates...
-INFO:__main__:Loading model and tokenizer for PPO training...
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:12<00:12, 12.09s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:16<00:00,  7.35s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:16<00:00,  8.06s/it]
-The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
-The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
-trainable params: 159,907,840 || all params: 6,898,323,456 || trainable%: 2.3181
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:11<00:11, 11.34s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:15<00:00,  6.97s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:15<00:00,  7.63s/it]
-INFO:model_utils:Total parameters: 3,660,365,825
-INFO:model_utils:Trainable parameters: 159,911,937
-INFO:model_utils:Trainable percentage: 4.37%
-INFO:__main__:Policy model loaded with 159,911,937 trainable parameters
-INFO:__main__:Reference model created (frozen copy)
-INFO:__main__:Optimizer initialized with learning rate: 3e-06
-INFO:__main__:IMPROVED PPO hyperparameters:
-INFO:__main__:  PPO epochs: 2
-INFO:__main__:  Clip range: 0.15
-INFO:__main__:  KL coefficient: 0.15
-INFO:__main__:  Learning rate: 3e-06
-INFO:__main__:  Max KL threshold: 0.5
-INFO:__main__:  Early stopping patience: 2
-INFO:__main__:PEFT model detected: True
-INFO:__main__:Tokenizer vocab size: 32005
-INFO:__main__:Pad token: <pad> (ID: 32004)
-INFO:__main__:EOS token: </s> (ID: 2)
-INFO:__main__:Loading and preprocessing MBPP dataset...
-trainable params: 159,907,840 || all params: 6,898,323,456 || trainable%: 2.3181
-Preparing training data:   0%|          | 0/374 [00:00<?, ?it/s]Preparing training data: 100%|██████████| 374/374 [00:00<00:00, 6683.41it/s]
-Filter:   0%|          | 0/374 [00:00<?, ? examples/s]Filter: 100%|██████████| 374/374 [00:00<00:00, 7120.77 examples/s]
-Map:   0%|          | 0/374 [00:00<?, ? examples/s]Map: 100%|██████████| 374/374 [00:00<00:00, 9596.60 examples/s]
-INFO:__main__:Dataset loaded with 374 examples
-INFO:__main__:Setting up reward function...
-wandb: Currently logged in as: yuexi-shen to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
-wandb: Tracking run with wandb version 0.19.11
-wandb: Run data is saved locally in /home/yuexi/codegeneration/finetuning/wandb/run-20250531_214633-40lyjfa8
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run codellama-7b-ppo-qlora
-wandb: ⭐️ View project at https://wandb.ai/yuexi-shen/codellama-mbpp-finetuning
-wandb: 🚀 View run at https://wandb.ai/yuexi-shen/codellama-mbpp-finetuning/runs/40lyjfa8
-INFO:__main__:Starting complete PPO training with 31 batches per epoch
-INFO:__main__:Dataset size: 374 samples
-INFO:__main__:Batch size: 12
-INFO:__main__:PPO epochs per step: 2
-INFO:__main__:Learning rate: 3e-06
-INFO:__main__:Total samples per epoch: 372
-INFO:__main__:Starting epoch 1/2
-Epoch 1/2:   0%|                                                                                                  | 0/31 [00:00<?, ?batch/s]/home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:   0%| | 0/31 [02:33<?, ?batch/s, Reward=0.508, Success=1.00, Pass@1=0.33, TestPass=0.25, KL=-0.000, PolicyLoss=-6.823, ValueLoss=Epoch 1/2:   3%| | 1/31 [02:33<1:16:40, 153.36s/batch, Reward=0.508, Success=1.00, Pass@1=0.33, TestPass=0.25, KL=-0.000, PolicyLoss=-6.823,/home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:   3%| | 1/31 [05:59<1:16:40, 153.36s/batch, Reward=0.534, Success=0.83, Pass@1=0.42, TestPass=0.35, KL=0.000, PolicyLoss=-7.054, Epoch 1/2:   6%| | 2/31 [05:59<1:29:09, 184.45s/batch, Reward=0.534, Success=0.83, Pass@1=0.42, TestPass=0.35, KL=0.000, PolicyLoss=-7.054, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:   6%| | 2/31 [08:56<1:29:09, 184.45s/batch, Reward=0.442, Success=0.92, Pass@1=0.25, TestPass=0.26, KL=0.000, PolicyLoss=-5.864, Epoch 1/2:  10%| | 3/31 [08:56<1:24:30, 181.10s/batch, Reward=0.442, Success=0.92, Pass@1=0.25, TestPass=0.26, KL=0.000, PolicyLoss=-5.864, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  10%| | 3/31 [11:27<1:24:30, 181.10s/batch, Reward=0.527, Success=0.92, Pass@1=0.33, TestPass=0.32, KL=0.000, PolicyLoss=-7.045, Epoch 1/2:  13%|▏| 4/31 [11:27<1:16:02, 168.98s/batch, Reward=0.527, Success=0.92, Pass@1=0.33, TestPass=0.32, KL=0.000, PolicyLoss=-7.045, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  13%|▏| 4/31 [14:48<1:16:02, 168.98s/batch, Reward=0.549, Success=0.92, Pass@1=0.42, TestPass=0.30, KL=0.000, PolicyLoss=-7.437, INFO:__main__:Step 5: {'rewards/mean': 0.5488854278753205, 'rewards/max': 1.0999976120645443, 'rewards/min': -0.10000451033156424, 'success_rate': 0.9166666666666666, 'test_pass_rate': 0.30434782608695654, 'avg_test_ratio': 0.5151515151515151, 'avg_quality_score': 0.9272727272727274, 'pass_at_1': 0.4166666666666667, 'syntax_errors': 1, 'total_tests': 23, 'passed_tests': 7, 'avg_kl_divergence': 2.3073423790265224e-05, 'avg_base_reward': 0.548888888888889, 'policy_loss': -7.4372113682329655, 'value_loss': 6.441704066004604, 'entropy_loss': -0.1999607142060995, 'ppo_epochs': 2, 'update_count': 24, 'update_skipped': False}
-Epoch 1/2:  16%|▏| 5/31 [14:48<1:18:21, 180.82s/batch, Reward=0.549, Success=0.92, Pass@1=0.42, TestPass=0.30, KL=0.000, PolicyLoss=-7.437, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  16%|▏| 5/31 [17:37<1:18:21, 180.82s/batch, Reward=0.499, Success=0.92, Pass@1=0.33, TestPass=0.28, KL=0.000, PolicyLoss=-6.625, Epoch 1/2:  19%|▏| 6/31 [17:37<1:13:34, 176.58s/batch, Reward=0.499, Success=0.92, Pass@1=0.33, TestPass=0.28, KL=0.000, PolicyLoss=-6.625, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  19%|▏| 6/31 [19:42<1:13:34, 176.58s/batch, Reward=0.792, Success=1.00, Pass@1=0.58, TestPass=0.50, KL=0.000, PolicyLoss=-10.710,Epoch 1/2:  23%|▏| 7/31 [19:42<1:03:55, 159.79s/batch, Reward=0.792, Success=1.00, Pass@1=0.58, TestPass=0.50, KL=0.000, PolicyLoss=-10.710,/home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  23%|▏| 7/31 [23:16<1:03:55, 159.79s/batch, Reward=0.609, Success=0.92, Pass@1=0.50, TestPass=0.33, KL=0.000, PolicyLoss=-8.312, Epoch 1/2:  26%|▎| 8/31 [23:16<1:07:53, 177.12s/batch, Reward=0.609, Success=0.92, Pass@1=0.50, TestPass=0.33, KL=0.000, PolicyLoss=-8.312, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  26%|▎| 8/31 [26:14<1:07:53, 177.12s/batch, Reward=0.623, Success=1.00, Pass@1=0.42, TestPass=0.35, KL=0.000, PolicyLoss=-8.468, Epoch 1/2:  29%|▎| 9/31 [26:14<1:04:59, 177.24s/batch, Reward=0.623, Success=1.00, Pass@1=0.42, TestPass=0.35, KL=0.000, PolicyLoss=-8.468, /home/yuexi/miniconda3/envs/codegeneration/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py:838: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
-  return fn(*args, **kwargs)
-Epoch 1/2:  29%|▎| 9/31 [28:36<1:04:59, 177.24s/batch, Reward=0.656, Success=1.00, Pass@1=0.50, TestPass=0.33, KL=0.000, PolicyLoss=-9.020, INFO:__main__:Step 10: {'rewards/mean': 0.6555328523157086, 'rewards/max': 1.0999838135845494, 'rewards/min': 0.09996507112955443, 'success_rate': 1.0, 'test_pass_rate': 0.3333333333333333, 'avg_test_ratio': 0.5555555555555555, 'avg_quality_score': 1.0, 'pass_at_1': 0.5, 'syntax_errors': 0, 'total_tests': 24, 'passed_tests': 8, 'avg_kl_divergence': 0.00015135493231355213, 'avg_base_reward': 0.6555555555555554, 'policy_loss': -9.019503995776176, 'value_loss': 7.897358879446983, 'entropy_loss': -0.21959977596998215, 'ppo_epochs': 2, 'update_count': 24, 'update_skipped': False}
-Epoch 1/2:  32%|▎| 10/31 [28:36<58:16, 166.49s/batch, Reward=0.656, Success=1.00, Pass@1=0.50, TestPass=0.33, KL=0.000, PolicyLoss=-9.020, V

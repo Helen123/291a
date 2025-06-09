@@ -17,7 +17,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
 from tqdm import tqdm
 import numpy as np
 
-from data_utils import MBPPDataProcessor, RewardFunction, check_code_correctness
+from data_utils import MBPPDataProcessor, RewardFunction, check_code_correctness, HumanEvalDataProcessor
 
 # Setup logging
 logging.basicConfig(
@@ -317,6 +317,166 @@ class BigCodeCompatibleEvaluator:
             json.dump(results_to_save, f, indent=2, default=str)
         logger.info(f"Results saved to {output_path}")
 
+    def evaluate_on_humaneval(self, split: str = "test", max_samples: Optional[int] = None,
+                            max_new_tokens: int = 256, temperature: float = 0.1,
+                            num_samples: int = 15) -> Dict[str, Any]:
+        """
+        Evaluate model on HumanEval dataset using bigcode-compatible evaluation.
+        
+        Args:
+            split: Dataset split (only "test" available for HumanEval)
+            max_samples: Maximum number of problems to evaluate
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            num_samples: Number of samples per problem
+            
+        Returns:
+            Dictionary with evaluation results
+        """
+        logger.info(f"Loading HumanEval {split} dataset...")
+        processor = HumanEvalDataProcessor(split=split)
+        dataset = processor.load_dataset()
+        
+        if max_samples:
+            dataset = dataset.select(range(min(max_samples, len(dataset))))
+        
+        logger.info(f"Evaluating on {len(dataset)} problems with {num_samples} samples each...")
+        
+        predictions = []
+        references = []
+        problems_with_pass = 0
+        
+        for i, problem in enumerate(tqdm(dataset, desc="Evaluating problems")):
+            # Get prompt and reference
+            prompt = processor.get_prompt(problem)
+            reference = processor.get_reference(problem)
+            
+            # Generate multiple solutions
+            generated_codes = self.generate_code(
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                num_samples=num_samples
+            )
+            
+            # Postprocess generations (bigcode-style)
+            postprocessed_codes = []
+            for code in generated_codes:
+                postprocessed = processor.postprocess_generation(code, i)
+                postprocessed_codes.append(postprocessed)
+            
+            predictions.append(postprocessed_codes)
+            references.append(reference)
+            
+            # Check if any solution passes
+            has_pass = False
+            for code in postprocessed_codes:
+                try:
+                    # Extract the generated part (remove prompt)
+                    if code.startswith(prompt):
+                        code_only = code[len(prompt):]
+                    else:
+                        code_only = code
+                    
+                    # Test execution
+                    result = check_code_correctness(code_only + reference, "", timeout=10.0)
+                    if result["passed"]:
+                        has_pass = True
+                        break
+                except Exception:
+                    continue
+            
+            if has_pass:
+                problems_with_pass += 1
+        
+        # Compute pass@k metrics using bigcode method
+        results = self.compute_code_eval_humaneval_style(predictions, references)
+        
+        total_problems = len(dataset)
+        results.update({
+            "total_problems": total_problems,
+            "problems_with_solutions": problems_with_pass,
+            "solve_rate": problems_with_pass / total_problems if total_problems > 0 else 0,
+            "generations": predictions,
+            "references": references
+        })
+        
+        return results
+
+    def compute_code_eval_humaneval_style(self, predictions: List[List[str]], 
+                                        references: List[str]) -> Dict[str, float]:
+        """
+        Compute pass@k metrics for HumanEval exactly like bigcode-evaluation-harness.
+        
+        Args:
+            predictions: List of lists containing generated code (postprocessed)
+            references: List of reference test cases with entry point
+            
+        Returns:
+            Dictionary with pass@k metrics
+        """
+        def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
+            """Estimate pass@k using unbiased estimator from HumanEval paper."""
+            if num_samples - num_correct < k:
+                return 1.0
+            return 1.0 - np.prod(1.0 - k / np.arange(num_samples - num_correct + 1, num_samples + 1))
+        
+        # Evaluate each problem
+        problem_results = []
+        
+        for i, (pred_list, reference) in enumerate(zip(predictions, references)):
+            # Count correct solutions for this problem
+            correct_count = 0
+            
+            for prediction in pred_list:
+                try:
+                    # For HumanEval, the prediction should already be postprocessed
+                    # and include the prompt. We need to extract just the generated part
+                    # and combine it with the test reference
+                    
+                    # Get the original prompt for this problem
+                    processor = HumanEvalDataProcessor()
+                    dataset = processor.load_dataset()
+                    prompt = processor.get_prompt(dataset[i])
+                    
+                    # Extract generated code
+                    if prediction.startswith(prompt):
+                        code = prediction[len(prompt):]
+                    else:
+                        code = prediction
+                    
+                    # Combine code with test reference
+                    test_program = code + reference
+                    
+                    # Test the code using timeout execution
+                    result = check_code_correctness(test_program, "", timeout=3.0)
+                    if result["passed"]:
+                        correct_count += 1
+                        
+                except Exception:
+                    # If execution fails, count as incorrect
+                    continue
+            
+            problem_results.append({
+                "total": len(pred_list),
+                "correct": correct_count
+            })
+        
+        # Compute pass@k for different k values (HumanEval standard)
+        k_values = [1, 10, 100]
+        results = {}
+        
+        for k in k_values:
+            if all(r["total"] >= k for r in problem_results):
+                pass_at_k_scores = []
+                for result in problem_results:
+                    score = estimate_pass_at_k(result["total"], result["correct"], k)
+                    pass_at_k_scores.append(score)
+                
+                results[f"pass@{k}"] = np.mean(pass_at_k_scores)
+        
+        return results
+
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -326,6 +486,14 @@ def parse_arguments():
         "model_path",
         type=str,
         help="Path to the fine-tuned model"
+    )
+    
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="mbpp",
+        choices=["mbpp", "humaneval"],
+        help="Dataset to evaluate on (default: mbpp)"
     )
     
     parser.add_argument(
@@ -394,19 +562,31 @@ def main():
     
     # Run evaluation
     logger.info("Starting bigcode-compatible evaluation...")
-    results = evaluator.evaluate_on_mbpp(
-        split=args.split,
-        max_samples=args.max_samples,
-        max_new_tokens=args.max_new_tokens,
-        temperature=args.temperature,
-        num_samples=args.num_samples
-    )
+    
+    if args.dataset == "mbpp":
+        results = evaluator.evaluate_on_mbpp(
+            split=args.split,
+            max_samples=args.max_samples,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            num_samples=args.num_samples
+        )
+    elif args.dataset == "humaneval":
+        results = evaluator.evaluate_on_humaneval(
+            split="test",  # HumanEval only has test split
+            max_samples=args.max_samples,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            num_samples=args.num_samples
+        )
+    else:
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
     
     # Print results
     logger.info("=" * 80)
     logger.info("BIGCODE-COMPATIBLE EVALUATION RESULTS")
     logger.info("=" * 80)
-    logger.info(f"Dataset: MBPP {args.split}")
+    logger.info(f"Dataset: {args.dataset.upper()} {args.split if args.dataset == 'mbpp' else 'test'}")
     logger.info(f"Model: {args.model_path}")
     logger.info(f"Total problems: {results['total_problems']}")
     logger.info(f"Problems with solutions: {results['problems_with_solutions']}")
@@ -421,7 +601,8 @@ def main():
     # Save results
     if args.output_path is None:
         model_name = Path(args.model_path).name
-        args.output_path = f"bigcode_eval_results_{model_name}_{args.split}.json"
+        split_name = args.split if args.dataset == "mbpp" else "test"
+        args.output_path = f"bigcode_eval_results_{args.dataset}_{model_name}_{split_name}.json"
     
     evaluator.save_results(results, args.output_path)
     
