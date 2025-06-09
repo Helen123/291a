@@ -1,4 +1,4 @@
-# CodeLlama Fine-tuning with QLoRA (PPO & GRPO)
+# Enhancing LLM Code Generation via Reinforcement Learning Techniques
 
 This repository contains code for fine-tuning CodeLlama and other code generation models using QLoRA with PPO and GRPO reinforcement learning methods on MBPP and HumanEval datasets. The implementation uses result-oriented reward functions based on actual code execution.
 
